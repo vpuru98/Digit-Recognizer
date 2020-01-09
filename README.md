@@ -26,4 +26,4 @@ Next, run the following command to draw a digit and obtain a prediction
     python3 preview_test.py
 
 ### Example
-![](assets/image1.jpeg)
+![](assets/example.jpeg)
