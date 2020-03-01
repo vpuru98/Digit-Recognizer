@@ -9,9 +9,9 @@ CLASSES = 10
 
 
 def vectorize(image):
-    image_vector = np.ones(INPUT_FEATURES)
+    image_vector = np.ones((INPUT_FEATURES, 1))
     for i in range(784):
-        image_vector[i] = image[i // 28][i % 28]
+        image_vector[i, 0] = image[i // 28][i % 28]
 
     return image_vector
 
@@ -19,10 +19,10 @@ def vectorize(image):
 def get_digit(image):
 
     image_vector = vectorize(image)
-    binfile = open('predictor_bin', 'rb')
+    binfile = open('predictor_bin_primary', 'rb')
     ann = pickle.load(binfile)
 
-    outputs = ann.predict(image_vector)
+    outputs = ann.predict(image_vector).reshape((CLASSES, ))
     max_prob, max_prob_dig = 0, 0
     for i in range(CLASSES):
         print("Probability of digit to be %i = %f" % (i, outputs[i]))

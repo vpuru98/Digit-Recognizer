@@ -2,133 +2,304 @@
 import numpy as np
 
 
-class ANN:
+# Defining Activation functions
+
+def sigmoid(x):
+    return 1 / (1 + np.exp(x * -1))
+
+def tanh(x):
+    return (np.exp(x) - np.exp(x * -1)) / (np.exp(x) + np.exp(x * -1))
+
+def relu(x):
+    return np.maximum(x, 0)
+
+def dSigmoid(x):
+    y = sigmoid(x)
+    return y * (1 - y)
+
+def dTanh(x):
+    y = tanh(x)
+    return 1 - y ** 2
+
+def dRelu(x):
+    return np.array(x >= 0, dtype='float64')
+
+activation_function_dictionary = {
+    'sigmoid': {
+        'function': sigmoid,
+        'derivative': dSigmoid
+    },
+    'relu': {
+        'function': relu,
+        'derivative': dRelu
+    },
+    'tanh': {
+        'function': tanh,
+        'derivative': dTanh
+    }
+}
 
 
-    def __init__(self, X, y, layers=None):
-        self.X = np.array(X, dtype='float64')
-        self.y = np.array(y, dtype='float64')
-        self.features = len(X[0])
-        self.classes = len(y[0])
-        self.layers = [self.features, self.classes]
-        if layers is not None:
-            self.layers.pop()
-            self.layers.extend(layers)
-            self.layers.append(self.classes)
 
-        self.m = len(X)
-        self.layer_count = len(self.layers)
+# Defining Initializers
 
+def zero_initialization(dim1, dim2):
+    return np.zeros((dim1, dim2))
 
-    def init_parameters(self):
-        self.parameters = []
-        for i in range(self.layer_count - 1):
-            np.random.seed(0)
-            self.parameters.append(np.random.randn(self.layers[i + 1], 
-                        self.layers[i] + 1) * np.sqrt(1 / self.layers[i]))
+def random_initializtion(dim1, dim2):
+    np.random.seed(0)
+    return np.random.randn(dim1, dim2)
 
+def xavier_initialization(units, prev_units):
+    np.random.seed(0)
+    return np.random.randn(units, prev_units) * ((1 / prev_units) ** 0.5)
 
-    def init_network(self):
-        self.neurons = []
-        for i in range(self.layer_count):
-            self.neurons.append(np.zeros(self.layers[i]))
+def he_initialization(units, prev_units):
+    np.random.seed(0)
+    return np.random.randn(units, prev_units) * ((2 / prev_units) ** 0.5)
+
+initialization_dictionary = {
+    'zero': zero_initialization,
+    'random': random_initializtion,
+    'xavier': xavier_initialization,
+    'he': he_initialization
+}
 
 
-    def forwardpropagation(self, inp):
-        self.neurons[0] = inp
-        for i in range(1, self.layer_count):
-            layer_prev = np.ones(self.layers[i - 1] + 1)
-            layer_prev[1:] = self.neurons[i - 1]
-            self.neurons[i] = np.reciprocal(np.exp((self.parameters[i - 1]
-                                @ layer_prev) * -1) + 1)
+
+# Defining Cost Functions
+
+def mse(outputs, labels):
+     m = np.size(outputs, axis=1)
+     cost = np.sum((outputs - labels) ** 2) / (2 * m)
+     return cost
+
+def mse_derivative(outputs, labels):
+    m = np.size(outputs, axis=1)
+    outputs = outputs + 10 ** -12
+    return (outputs - labels) / m
+
+def cross_entropy(outputs, labels):
+    m = np.size(outputs, axis=1)
+    cost = -np.sum((labels * np.log(outputs + 10 ** -12)) + ((1 - labels) * 
+                   np.log((1 - outputs) + 10 ** -12))) 
+    return cost / m
+
+def cross_entropy_derivative(outputs, labels):
+    outputs = outputs + 10 ** -12
+    return (1 - labels) / (1 - outputs) - labels / outputs
+
+def regularization(regularization_constant, layers):
+    m = np.size(layers[0].parameters['W'], axis=1)
+    regularization_cost = 0
+    for layer in layers:
+        regularization_cost += (np.sum(layer.parameters['W'] ** 2) + 
+                                    np.sum(layer.parameters['b'] ** 2)) 
+    return regularization_cost * (regularization_constant / (2 * m))
+
+def regularization_derivative(regularization_constant, layers):
+    m = np.size(layers[0].parameters['W'], axis=1)
+    return [
+            {
+                'W': layer.parameters['W'] * (regularization_constant / m), 
+                'b': layer.parameters['b'] * (regularization_constant / m)
+            }
+            for layer in layers
+    ]
+    
+cost_functions_dictionary = {
+    'mse': {
+        'function': mse,
+        'derivative': mse_derivative
+    },
+    'cross_entropy': {
+        'function': cross_entropy,
+        'derivative': cross_entropy_derivative
+    },
+    'regularization': {
+        'function': regularization,
+        'derivative': regularization_derivative
+    }
+}
 
 
-    def backpropagation(self):
-        self.gradients = []
-        for i in range(self.layer_count - 1):
-            self.gradients.append(np.zeros((self.layers[i + 1], 
-                                                self.layers[i] + 1)))
 
-        for i in range(self.m):
-            if i % 5000 == 0:
-                print('\tBackpropagation: Running for example number {}'.
-                        format(i))
-                
-            self.forwardpropagation(self.X[i, :])
-            delta = np.zeros((self.classes, 1))
-            delta[:, 0] = self.neurons[self.layer_count - 1] - self.y[i]
-            for j in range(self.layer_count - 1, 0, -1):
-                layer_prev = np.ones((self.layers[j - 1] + 1, 1))
-                layer_prev[1:, 0] = self.neurons[j - 1]
-                self.gradients[j - 1] += delta @ layer_prev.transpose()
-                delta_prev = (((self.parameters[j - 1].transpose() @ delta) * 
-                               (layer_prev * (1 - layer_prev)))[1:, :])
-                delta = delta_prev
+# Defining Layer class
+
+class Layer:
+
+    def __init__(self, activation, units, prev_units, initializer='xavier'):
+        assert activation in activation_function_dictionary
+        assert initializer in initialization_dictionary
+        self.function = activation_function_dictionary[activation]['function']
+        self.derivative = activation_function_dictionary[activation]['derivative']
+        self.parameters = {
+            'W': initialization_dictionary[initializer](units, prev_units),
+            'b': initialization_dictionary['zero'](units, 1)
+        }
+
+
+    def forward_propagate(self, X):
+        self.pre_activations = np.dot(self.parameters['W'], X) + self.parameters['b']
+        self.activations = self.function(self.pre_activations)
+        return self.activations
     
 
-    def cost_function(self):
-        def cost_per_example(example_number):
-            self.forwardpropagation(self.X[example_number, :])
-            output = self.neurons[-1]
-            cost = 0.0
-            for j in range(self.classes):
-                cost1, cost2 = 0, 0
-                try:
-                    cost1 = float((-self.y[example_number][j]) * 
-                                  (np.log(output[j]))) / self.m
-                except ValueError:
-                    cost1 = -1000.0
-                try:
-                    cost2 = (float((1 - self.y[example_number][j]) * 
-                                   (np.log(1 - output[j]))) / self.m) * -1
-                except ValueError:
-                    cost2 = -1000.0
+    def backward_propagate(self, dA, X):
+        dZ = dA * self.derivative(self.pre_activations)
+        dW = np.dot(dZ, X.T) / np.size(X, axis=1)
+        db = np.sum(dZ, axis=1, keepdims=True) / np.size(X, axis=1)
+        dA = np.dot(self.parameters['W'].T, dZ)
+        return dW, db, dA
 
-                cost += cost1 + cost2
 
-            return cost
 
-        cost = 0.0
-        for i in range(self.m):
-            cost += cost_per_example(i)
+# Defining ANN class
 
+class ANN:
+
+    @staticmethod
+    def shuffle(X, Y):
+        X_shuffled = X.copy()
+        Y_shuffled = Y.copy()
+        for i in range(np.size(X_shuffled, axis=1)):
+            np.random.seed(0)
+            swap_index = np.random.randint(i, np.size(X_shuffled, axis=1))
+            X_temp = X_shuffled[:, i]
+            Y_temp = Y_shuffled[:, i]
+            X_shuffled[:, i] = X_shuffled[:, swap_index]
+            Y_shuffled[:, i] = Y_shuffled[:, swap_index]
+            X_shuffled[:, swap_index] = X_temp
+            Y_shuffled[:, swap_index] = Y_temp
+        return X_shuffled, Y_shuffled
+
+
+    @staticmethod
+    def get_mini_batch_splits(mini_batch_size, dataset_size):
+        splits = []
+        index = 0
+        while index < dataset_size:
+            splits.append((index, min(index + mini_batch_size - 1, dataset_size - 1)))
+            index += mini_batch_size
+        return splits
+
+
+    def __init__(self, input_size, cost_function):
+        assert cost_function in cost_functions_dictionary
+        self.cost_function = cost_functions_dictionary[cost_function]
+        self.last_input_size = input_size
+        self.layers = []
+
+
+    def add_layer(self, activation, units, initializer='xavier'):
+        self.layers.append(Layer(activation, units, self.last_input_size, initializer))
+        self.last_input_size = units
+    
+
+    def descend_with_batch(self, X_batch, Y_batch, learning_rate, beta1, beta2, 
+        regularization_constant, V_W, V_b, S_W, S_b):
+        outputs = X_batch
+        for j in range(len(self.layers)):
+            outputs = self.layers[j].forward_propagate(outputs)
+
+        regularization_derivatives = (cost_functions_dictionary['regularization']['derivative']
+                                      (regularization_constant, self.layers))
+        dA = self.cost_function['derivative'](outputs, Y_batch)
+        for j in range(-1, -len(self.layers) - 1, -1):
+            dW, db, dA = self.layers[j].backward_propagate(dA, X_batch if 
+                j == -len(self.layers) else self.layers[j - 1].activations)
+            dW = dW + regularization_derivatives[j]['W']
+            db = db + regularization_derivatives[j]['b']
+            
+            V_W[j]['updates'] += 1
+            V_W[j]['values'] = beta1 * V_W[j]['values'] + dW
+            V_W[j]['values'] = V_W[j]['values'] * ((1 - beta1) / (1 - beta1 ** (V_W[j]['updates'])))
+            V_b[j]['updates'] += 1
+            V_b[j]['values'] = beta1 * V_b[j]['values'] + db
+            V_b[j]['values'] = V_b[j]['values'] * ((1 - beta1) / (1 - beta1 ** (V_b[j]['updates'])))
+            S_W[j]['updates'] += 1
+            S_W[j]['values'] = beta2 * S_W[j]['values'] + dW ** 2
+            S_W[j]['values'] = S_W[j]['values'] * ((1 - beta2) / (1 - beta2 ** (S_W[j]['updates'])))
+            S_b[j]['updates'] += 1
+            S_b[j]['values'] = beta2 * S_b[j]['values'] + db ** 2
+            S_b[j]['values'] = S_b[j]['values'] * ((1 - beta2) / (1 - beta2 ** (S_b[j]['updates'])))
+
+            self.layers[j].parameters['W'] = (self.layers[j].parameters['W'] - learning_rate * 
+                            (V_W[j]['values'] / (S_W[j]['values'] ** 0.5 + 10 ** -12)))
+            self.layers[j].parameters['b'] = (self.layers[j].parameters['b'] - learning_rate * 
+                            (V_b[j]['values'] / (S_b[j]['values'] ** 0.5 + 10 ** -12)))
+
+            self.layers[j].parameters['W'] += 10 ** -12
+            self.layers[j].parameters['b'] += 10 ** -12
+        
+        outputs = X_batch
+        for j in range(len(self.layers)):
+            outputs = self.layers[j].forward_propagate(outputs)
+        cost = round(self.cost_function['function'](outputs, Y_batch) +  
+                     cost_functions_dictionary['regularization']['function']
+                     (regularization_constant, self.layers), 4)
         return cost
 
 
-    def gradient_descent(self, alpha, n_iter):
-        for i in range(n_iter):
-            print('Gradient Descent: Running iteration {}'.format(i + 1))
-            self.backpropagation()
-            for j in range(self.layer_count - 1):
-                self.parameters[j] -= (alpha / self.m) * self.gradients[j]
-            
-            if i % 30 == 0:
-                print("Gradient Descent: Dumping object after iteration {}".
-                      format(i + 1))
+    def fit(self, X, Y, num_iterations=100, learning_rate=0.001, beta1=0.9, 
+        beta2=0.999, regularization_constant=0, mini_batch_size = 512):
+        assert self.layers[0].parameters['W'].shape[1] == X.shape[0]
+        X, Y = self.shuffle(X ,Y)
+        X = self.normalize(X)
 
+        V_W = [{'values': np.zeros(layer.parameters['W'].shape), 'updates': 0} 
+               for layer in self.layers]
+        V_b = [{'values': np.zeros(layer.parameters['b'].shape), 'updates': 0} 
+               for layer in self.layers]
+        S_W = [{'values': np.zeros(layer.parameters['W'].shape), 'updates': 0} 
+               for layer in self.layers]
+        S_b = [{'values': np.zeros(layer.parameters['b'].shape), 'updates': 0} 
+               for layer in self.layers]
+        
+        if mini_batch_size == -1:
+            mini_batch_size = np.size(X, axis=1)
+        splits = self.get_mini_batch_splits(mini_batch_size, np.size(X, axis=1))
+        costs = []
+        for i in range(num_iterations + 1):
+            for split in splits:
+                X_batch = X[:, split[0]:split[1] + 1]
+                Y_batch = Y[:, split[0]:split[1] + 1]
+                self.descend_with_batch(X_batch, Y_batch, learning_rate, beta1, 
+                            beta2, regularization_constant, V_W, V_b, S_W, S_b)
 
-    def feature_scaling(self):
-        self.means = np.mean(self.X, axis=0)
-        self.scales = np.amax(self.X, axis=0) - np.amin(self.X, axis=0)
+            if (i + 1) % 5 == 0 or i + 1 == 1:
+                outputs = X
+                for j in range(len(self.layers)):
+                    outputs = self.layers[j].forward_propagate(outputs)
+                cost = round(self.cost_function['function'](outputs, Y) + 
+                            cost_functions_dictionary['regularization']['function']
+                            (regularization_constant, self.layers), 4)
+                print('Cost after epoch #{} = {}'.format(i + 1, cost))
+                costs.append(cost)
+
+        plt.plot([i + 1 for i in range(len(costs))], costs, color='black')
+        plt.title('Cost Variation')
+        plt.ylabel('Costs')
+        plt.show()
+    
+
+    def normalize(self, X):
+        self.means = np.mean(X, axis=1)
+        self.scales = np.amax(X, axis=1) - np.amin(X, axis=1)
         for i in range(len(self.scales)):
             if self.scales[i] == 0:
                 self.scales[i] = 1
+        self.means = self.means.reshape((np.size(X, axis=0), 1))
+        self.scales = self.scales.reshape((np.size(X, axis=0), 1))
+        X = (X - self.means) / self.scales
+        return X
+    
 
-        for i in range(self.m):
-            self.X[i, :] = self.X[i, :] - self.means
-            self.X[i, :] = self.X[i, :] / self.scales
+    def predict(self, X):
+        X = (X - self.means) / self.scales
+        outputs = X
+        for i in range(len(self.layers)):
+            outputs = self.layers[i].forward_propagate(outputs)
+        return outputs
 
 
-    def fit(self, alpha=0.3, n_iter=500, resume=True):
-        self.feature_scaling()
-        self.init_network()
-        self.init_parameters(resume)
-        self.gradient_descent(alpha, n_iter)
-
-
-    def predict(self, inp):
-        x = np.array(inp, dtype='float64')
-        x -= self.means
-        x /= self.scales
-        self.forwardpropagation(x)
-        return self.neurons[self.layer_count - 1]
