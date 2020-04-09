@@ -40,7 +40,6 @@ activation_function_dictionary = {
 }
 
 
-
 # Defining Initializers
 
 def zero_initialization(dim1, dim2):
@@ -66,7 +65,6 @@ initialization_dictionary = {
 }
 
 
-
 # Defining Cost Functions
 
 def mse(outputs, labels):
@@ -86,8 +84,9 @@ def cross_entropy(outputs, labels):
     return cost / m
 
 def cross_entropy_derivative(outputs, labels):
+    m = np.size(outputs, axis=1)
     outputs = outputs + 10 ** -12
-    return (1 - labels) / (1 - outputs) - labels / outputs
+    return ((1 - labels) / (1 - outputs) - labels / outputs) / m
 
 def regularization(regularization_constant, layers):
     m = np.size(layers[0].parameters['W'], axis=1)
@@ -123,12 +122,24 @@ cost_functions_dictionary = {
 }
 
 
-
 # Defining Layer class
 
 class Layer:
 
+    def __init__(self, layer_type):
+        self.layer_type = layer_type
+    
+    def forward_propagate(self, X, predict=False):
+        pass
+    
+    def backward_propagate(self, dA, X):
+        pass
+
+
+class Dense(Layer):
+
     def __init__(self, activation, units, prev_units, initializer='xavier'):
+        super().__init__('Dense')
         assert activation in activation_function_dictionary
         assert initializer in initialization_dictionary
         self.function = activation_function_dictionary[activation]['function']
@@ -138,20 +149,55 @@ class Layer:
             'b': initialization_dictionary['zero'](units, 1)
         }
 
-
-    def forward_propagate(self, X):
+    def forward_propagate(self, X, predict=False):
         self.pre_activations = np.dot(self.parameters['W'], X) + self.parameters['b']
         self.activations = self.function(self.pre_activations)
         return self.activations
     
-
     def backward_propagate(self, dA, X):
         dZ = dA * self.derivative(self.pre_activations)
-        dW = np.dot(dZ, X.T) / np.size(X, axis=1)
-        db = np.sum(dZ, axis=1, keepdims=True) / np.size(X, axis=1)
+        dW = np.dot(dZ, X.T)
+        db = np.sum(dZ, axis=1, keepdims=True)
         dA = np.dot(self.parameters['W'].T, dZ)
         return dW, db, dA
 
+
+class BatchNorm(Layer):
+    
+    def __init__(self, prev_units):
+        super().__init__('BatchNorm')
+        self.units = prev_units
+        self.parameters = {
+            'W': np.ones((self.units, 1)),
+            'b': np.zeros((self.units, 1))
+        }
+        self.batch_count = 0
+
+    def forward_propagate(self, X, predict=False):
+        if(self.batch_count == 0):
+            self.avg_mean = np.zeros((X.shape[0], 1))
+            self.avg_dev = np.zeros((X.shape[0], 1))
+        if(not predict):
+            self.batch_mean = np.mean(X, axis=1, keepdims=True)
+            self.batch_dev = (np.var(X, axis=1, keepdims=True) + 10 ** -12) ** 0.5
+            self.avg_mean += self.batch_mean
+            self.avg_dev += self.batch_dev
+            self.batch_count += 1
+            self.activations = (self.parameters['W'] * ((X - self.batch_mean) / 
+                                        self.batch_dev) + self.parameters['b'])
+        else:
+            self.activations = (self.parameters['W'] * ((X - (self.avg_mean / 
+                                    self.batch_count)) / (self.avg_dev / 
+                                    self.batch_count)) + self.parameters['b'])
+        return self.activations
+
+    def backward_propagate(self, dA, X):
+        m = np.size(X, axis=1)
+        dW = np.sum(dA * ((X - self.batch_mean) / self.batch_dev), axis=1, keepdims=True)
+        db = np.sum(dA, axis=1, keepdims=True)
+        dA = dA * (self.parameters['W'] * (((m - 1) / m) * (1 - (1 / m) * (((X - 
+                        self.batch_mean) / self.batch_dev) ** 2)) *  (1 / self.batch_dev)))
+        return dW, db, dA
 
 
 # Defining ANN class
@@ -191,10 +237,14 @@ class ANN:
         self.layers = []
 
 
-    def add_layer(self, activation, units, initializer='xavier'):
-        self.layers.append(Layer(activation, units, self.last_input_size, initializer))
+    def add_layer_Dense(self, activation, units, initializer='xavier'):
+        self.layers.append(Dense(activation, units, self.last_input_size, initializer))
         self.last_input_size = units
     
+
+    def add_layer_BatchNorm(self):
+        self.layers.append(BatchNorm(self.last_input_size))
+
 
     def descend_with_batch(self, X_batch, Y_batch, learning_rate, beta1, beta2, 
         regularization_constant, V_W, V_b, S_W, S_b):
@@ -231,14 +281,6 @@ class ANN:
 
             self.layers[j].parameters['W'] += 10 ** -12
             self.layers[j].parameters['b'] += 10 ** -12
-        
-        outputs = X_batch
-        for j in range(len(self.layers)):
-            outputs = self.layers[j].forward_propagate(outputs)
-        cost = round(self.cost_function['function'](outputs, Y_batch) +  
-                     cost_functions_dictionary['regularization']['function']
-                     (regularization_constant, self.layers), 4)
-        return cost
 
 
     def fit(self, X, Y, num_iterations=100, learning_rate=0.001, beta1=0.9, 
@@ -299,7 +341,8 @@ class ANN:
         X = (X - self.means) / self.scales
         outputs = X
         for i in range(len(self.layers)):
-            outputs = self.layers[i].forward_propagate(outputs)
+            outputs = self.layers[i].forward_propagate(outputs, predict=True)
         return outputs
+
 
 
