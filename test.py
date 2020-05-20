@@ -19,7 +19,7 @@ def vectorize(image):
 def get_digit(image):
 
     image_vector = vectorize(image)
-    binfile = open('predictor_bin_primary', 'rb')
+    binfile = open('Models/predictor_bin_primary', 'rb')
     ann = pickle.load(binfile)
 
     outputs = ann.predict(image_vector).reshape((CLASSES, ))

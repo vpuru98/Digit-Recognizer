@@ -6,7 +6,7 @@ import numpy as np
 from math import sqrt
 
 import test
-from ann import *
+from ANN.ann import *
 
 
 WIDTH = 800
