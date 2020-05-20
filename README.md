@@ -38,4 +38,4 @@ To preview the first 100 images of the training or the test set, run the followi
 To view the code, run the jupyter notebook within the `ANN` directory
 
 ### Example
-![](Assets/example.jpeg)
+![](Examples/example.jpeg)
