@@ -34,6 +34,8 @@ To preview the first 100 images of the training or the test set, run the followi
  
     python3 preview_train.py
     python3 preview_test.py
+    
+To view the code, run the jupyter notebook within the `ANN` directory
 
 ### Example
-![](assets/example.jpeg)
+![](Assets/example.jpeg)
